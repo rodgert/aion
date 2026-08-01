@@ -94,12 +94,18 @@ int main(int argc, char* argv[]) {
     else if (!args.midi_in_port_name.empty())
         midi.open_input_port_by_name(args.midi_in_port_name, hw_midi_in_queue);
 
+    // OSC endpoint — constructed before the control thread so it can receive
+    // outbound msg_osc frames (external OSC send, mirroring .midi).
+    nomos::rt::osc_server osc{args.osc_port, osc_in_queue};
+    osc.start();
+
     aion::aion_control_thread ctrl{nomos::rt::rt_control_thread::config{
                                        .socket_path   = args.socket_path,
                                        .db_path       = args.db_path,
                                        .sched_staging = &scheduler.staging(),
                                        .mod_engine    = &mod_engine,
                                        .midi          = &midi,
+                                       .osc           = &osc,
                                    },
                                    param_queue, ipc_in_queue, routing};
     ctrl.start();
@@ -118,9 +124,6 @@ int main(int argc, char* argv[]) {
 
     nomos::rt::link_peer link{args.bpm};
     link.enable(true);
-
-    nomos::rt::osc_server osc{args.osc_port, osc_in_queue};
-    osc.start();
 
     nomos::rt::audio_device audio_dev;
     if (!args.no_audio) {
