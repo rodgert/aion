@@ -78,6 +78,7 @@ int main(int argc, char* argv[]) {
     nomos::rt::input_event_queue ipc_in_queue;
     nomos::rt::input_event_queue hw_midi_in_queue;
     nomos::rt::input_event_queue osc_in_queue;
+    nomos::rt::osc_out_queue     osc_out_queue; // scheduled OSC → drained on the event thread
 
     nomos::rt::event_scheduler  scheduler;
     nomos::rt::modulator_engine mod_engine;
@@ -98,6 +99,11 @@ int main(int argc, char* argv[]) {
     // outbound msg_osc frames (external OSC send, mirroring .midi).
     nomos::rt::osc_server osc{args.osc_port, osc_in_queue};
     osc.start();
+
+    // Route fired scheduled-OSC events to osc_out_queue; drained on the event
+    // thread below. aion's event thread is soft-RT and already sends MIDI inline,
+    // so the send here is consistent with its model (no separate sender thread).
+    scheduler.set_osc_out(&osc_out_queue);
 
     aion::aion_control_thread ctrl{nomos::rt::rt_control_thread::config{
                                        .socket_path   = args.socket_path,
@@ -199,6 +205,11 @@ int main(int argc, char* argv[]) {
             }
             while (auto ev = osc_in_queue.pop()) {
                 routing.route_event(*ev, aion::MidiRoute::Source::osc, midi);
+                did_work = true;
+            }
+            // Fired scheduled-OSC datagrams — sent inline (soft-RT thread).
+            while (auto out = osc_out_queue.pop()) {
+                osc.send_event(*out);
                 did_work = true;
             }
             while (param_queue.pop())
